@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0e0e10; --surface: #18181c; --border: #2a2a30;
+      --accent-c: #da7756; --accent-g: #4a9eff; --accent-gpt: #19c37d;
+      --text: #e8e8ec; --muted: #666670; --radius: 8px;
+    }
+    body { width: 420px; min-height: 320px; background: var(--bg); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; align-items: center; justify-content: space-between; }
+    .logo { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .targets { display: flex; gap: 6px; }
+    .target-pill { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--border); font-size: 11px; font-family: 'DM Mono', monospace; cursor: pointer; transition: all 0.15s; background: var(--surface); color: var(--muted); user-select: none; }
+    .target-pill.active-c   { border-color: var(--accent-c);   color: var(--accent-c);   background: #da775614; }
+    .target-pill.active-g   { border-color: var(--accent-g);   color: var(--accent-g);   background: #4a9eff14; }
+    .target-pill.active-gpt { border-color: var(--accent-gpt); color: var(--accent-gpt); background: #19c37d14; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.7; }
+    .input-area { position: relative; }
+    textarea { width: 100%; height: 120px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 14px; line-height: 1.6; padding: 12px; resize: none; outline: none; transition: border-color 0.2s; }
+    textarea:focus { border-color: #444450; }
+    textarea::placeholder { color: var(--muted); }
+    .shortcut-hint { position: absolute; bottom: 8px; right: 10px; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); pointer-events: none; }
+    .actions { display: flex; gap: 8px; }
+    .btn-send { flex: 1; padding: 10px; background: var(--accent-c); border: none; border-radius: var(--radius); color: #fff; font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
+    .btn-send:hover { opacity: 0.85; }
+    .btn-send:active { transform: scale(0.98); }
+    .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-icon { padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font-size: 14px; cursor: pointer; transition: all 0.15s; }
+    .btn-icon:hover { border-color: #444; color: var(--text); }
+    .status { font-size: 12px; color: var(--muted); min-height: 16px; font-family: 'DM Mono', monospace; }
+    .status.ok  { color: var(--accent-gpt); }
+    .status.err { color: #e05c5c; }
+    hr { border: none; border-top: 1px solid var(--border); }
+    .log-section { display: flex; flex-direction: column; gap: 8px; }
+    .log-header { display: flex; align-items: center; justify-content: space-between; }
+    .log-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .log-actions { display: flex; gap: 6px; }
+    .btn-small { padding: 4px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; font-family: 'DM Mono', monospace; cursor: pointer; transition: all 0.15s; }
+    .btn-small:hover { color: var(--text); border-color: #444; }
+    .btn-small.highlight { border-color: var(--accent-g); color: var(--accent-g); }
+    .log-preview { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; font-family: 'DM Mono', monospace; color: var(--muted); max-height: 90px; overflow-y: auto; line-height: 1.5; }
+    .log-entry { margin-bottom: 4px; }
+    .log-entry .me { color: var(--text); }
+    .log-entry .ts { color: #444; font-size: 10px; margin-right: 6px; }
+    .new-chat-bar { display: flex; align-items: center; justify-content: space-between; }
+    .new-chat-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .new-chat-btns { display: flex; gap: 5px; }
+    .btn-new-chat { padding: 3px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; color: var(--muted); font-size: 11px; font-family: 'DM Mono', monospace; cursor: pointer; transition: all 0.15s; }
+    .btn-new-chat:hover { color: var(--text); border-color: #555; }
+    .btn-new-all { border-color: #3a3a45; color: #888; }
+    .btn-new-all:hover { border-color: var(--accent-c); color: var(--accent-c); }
+    .empty-log { color: #333; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">AI Broadcaster</span>
+  <div class="targets">
+    <div class="target-pill active-gpt" id="pill-gpt"><span class="dot"></span>Monday</div>
+    <div class="target-pill active-c"   id="pill-claude"><span class="dot"></span>Claude</div>
+    <div class="target-pill active-g"   id="pill-gemini"><span class="dot"></span>Gemini</div>
+  </div>
+</header>
+
+<div class="new-chat-bar">
+  <span class="new-chat-label">新規チャット</span>
+  <div class="new-chat-btns">
+    <button class="btn-new-chat" id="new-gpt">Monday</button>
+    <button class="btn-new-chat" id="new-claude">Claude</button>
+    <button class="btn-new-chat" id="new-gemini">Gemini</button>
+    <button class="btn-new-chat btn-new-all" id="new-all">ALL</button>
+  </div>
+</div>
+
+<div class="input-area">
+  <textarea id="msg" placeholder="メッセージを入力… (Ctrl+Enter で送信)"></textarea>
+  <span class="shortcut-hint">Ctrl+Enter</span>
+</div>
+
+<div class="actions">
+  <button class="btn-send" id="btn-send">送信</button>
+  <button class="btn-icon" id="btn-clear" title="ログをクリア">🗑</button>
+</div>
+
+<div class="status" id="status"></div>
+
+<hr>
+
+<div class="log-section">
+  <div class="log-header">
+    <span class="log-label">ログ (<span id="log-count">0</span>件)</span>
+    <div class="log-actions">
+      <button class="btn-small" id="btn-dl-all">全履歴 .txt</button>
+      <button class="btn-small highlight" id="btn-dl-user">自分の発言のみ</button>
+    </div>
+  </div>
+  <div class="log-preview" id="log-preview">
+    <span class="empty-log">まだ送信していません</span>
+  </div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
