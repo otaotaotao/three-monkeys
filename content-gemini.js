@@ -9,11 +9,9 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleBroadcast(text) {
-  if (isThinking()) {
-    console.log('[AI Broadcaster] Gemini: thinking detected, reloading...');
-    location.reload();
-    await waitForReady(12000);
-  }
+  // Previously this reloaded the whole page when Gemini was mid-response.
+  // Simplified: just wait (no reload) until Gemini looks idle, then proceed.
+  await waitUntilIdle(15000);
   return insertAndSend(text);
 }
 
@@ -36,25 +34,14 @@ function isThinking() {
   return false;
 }
 
-async function waitForReady(timeout = 12000) {
+async function waitUntilIdle(timeout = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    await wait(600);
-    if (findInput()) break;
-  }
-  if (!findInput()) {
-    console.warn('[AI Broadcaster] Gemini: timeout waiting for input');
-    return;
-  }
-  await wait(2000);
-  const stableStart = Date.now();
-  while (Date.now() - stableStart < 5000) {
-    if (!isThinking()) {
-      console.log('[AI Broadcaster] Gemini: ready after reload');
-      return;
-    }
+    if (!isThinking()) return true;
     await wait(400);
   }
+  console.warn('[AI Broadcaster] Gemini: still busy after timeout, proceeding anyway');
+  return false;
 }
 
 function findInput() {

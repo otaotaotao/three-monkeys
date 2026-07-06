@@ -3,10 +3,16 @@
   "name": "AI Broadcaster",
   "version": "1.0.0",
   "description": "ChatGPT・Claude・Geminiに同時送信＆会話ログ保存",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "three-monkeys@otaotaotao"
+    }
+  },
   "permissions": [
     "tabs",
     "activeTab",
     "storage",
+    "downloads",
     "clipboardWrite",
     "clipboardRead",
     "https://claude.ai/*",
