@@ -10,7 +10,7 @@
       --accent-c: #da7756; --accent-g: #4a9eff; --accent-gpt: #19c37d;
       --text: #e8e8ec; --muted: #666670; --radius: 8px;
     }
-    body { width: 420px; max-height: 600px; overflow-y: auto; background: var(--bg); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    body { width: 480px; max-height: 680px; overflow-y: auto; background: var(--bg); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
     header { display: flex; align-items: center; justify-content: space-between; }
     .logo { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
 
@@ -27,7 +27,7 @@
     .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.7; }
 
     .input-area { position: relative; }
-    textarea { width: 100%; height: 120px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 14px; line-height: 1.6; padding: 12px; resize: none; outline: none; transition: border-color 0.2s; }
+    textarea { width: 100%; height: 200px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 14px; line-height: 1.6; padding: 12px; resize: none; outline: none; transition: border-color 0.2s; }
     textarea:focus { border-color: #444450; }
     textarea::placeholder { color: var(--muted); }
     .shortcut-hint { position: absolute; bottom: 8px; right: 10px; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); pointer-events: none; }
@@ -70,7 +70,23 @@
     .monkeys-view { display: flex; flex-direction: column; gap: 8px; }
     .monkey-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .monkey-box-label { font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase; }
-    .monkey-box textarea { height: 60px; font-size: 13px; padding: 8px 10px; }
+    .monkey-box textarea { height: 90px; font-size: 13px; padding: 8px 10px; }
+
+    .ambient-hint { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); min-height: 14px; }
+
+    .stats-view { display: flex; flex-direction: column; gap: 10px; }
+    .stats-latest { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--muted); }
+    .stats-window-row { display: flex; align-items: center; gap: 10px; }
+    .stats-window-row input[type="range"] { flex: 1; accent-color: #666; }
+    .btn-small.active { border-color: var(--accent-g); color: var(--accent-g); }
+    .stats-window-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
+    .stats-table { width: 100%; border-collapse: collapse; font-family: 'DM Mono', monospace; font-size: 12px; }
+    .stats-table th { text-align: right; font-size: 9px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px 6px; }
+    .stats-table th:first-child, .stats-table td:first-child { text-align: left; }
+    .stats-table td { text-align: right; padding: 5px 6px; color: var(--text); }
+    .stats-row-label { color: var(--muted); }
+    .stats-table .trend { color: var(--muted); font-size: 11px; }
+    .stats-ambient { width: 100%; height: 72px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
   </style>
 </head>
 <body>
@@ -82,9 +98,10 @@
 <div class="mode-tabs">
   <div class="mode-tab active" id="tab-broadcast">Broadcast</div>
   <div class="mode-tab" id="tab-monkeys">3 Monkeys</div>
+  <div class="mode-tab" id="tab-stats">Stats</div>
 </div>
 
-<div class="new-chat-bar">
+<div class="new-chat-bar" id="new-chat-bar">
   <span class="new-chat-label">New Chat</span>
   <div class="new-chat-btns">
     <button class="btn-new-chat" id="new-gpt">Monday</button>
@@ -108,11 +125,12 @@
   </div>
 
   <div class="actions">
-    <button class="btn-send" id="btn-send">Send</button>
+    <button class="btn-send" id="btn-send">Send for Yourself</button>
     <button class="btn-icon" id="btn-clear" title="Clear log">🗑</button>
   </div>
 
   <div class="status" id="status"></div>
+  <div class="ambient-hint" id="ambient-hint"></div>
 </div>
 
 <!-- ===== 3 Monkeys view ===== -->
@@ -137,10 +155,25 @@
   </div>
 
   <div class="actions">
-    <button class="btn-send" id="btn-send-monkeys">Send Combined</button>
+    <button class="btn-send" id="btn-send-monkeys">Send for Ourselves</button>
   </div>
 
   <div class="status" id="status-monkeys"></div>
+</div>
+
+<!-- ===== Stats view (broadcast log only, ambient reflection not restriction) ===== -->
+<div id="view-stats" class="stats-view hidden">
+  <div class="stats-latest" id="stats-latest">No sends yet</div>
+
+  <div class="stats-window-row">
+    <input type="range" id="stats-slider" min="2" max="12" value="6">
+    <button class="btn-small" id="stats-today-btn">Today</button>
+  </div>
+  <div class="stats-window-label" id="stats-window-label"></div>
+
+  <div id="stats-table"></div>
+
+  <svg class="stats-ambient" id="stats-ambient" viewBox="0 0 440 72" preserveAspectRatio="xMidYMid meet"></svg>
 </div>
 
 <hr>

@@ -4,6 +4,7 @@ let monkeyTexts = { gpt: '', claude: '', gemini: '' };
 let mode = 'broadcast';
 let logBroadcast = [];
 let logMonkeys = [];
+let statsWindow = { mode: 'count', n: 6 }; // ambient reflection window for the Stats tab (broadcast log only)
 
 const URLS = {
   gpt:    'https://chatgpt.com/',
@@ -29,15 +30,20 @@ let monkeySendTimestamps = [];
 // ===== Mode tabs =====
 document.getElementById('tab-broadcast').addEventListener('click', () => setMode('broadcast'));
 document.getElementById('tab-monkeys').addEventListener('click', () => setMode('monkeys'));
+document.getElementById('tab-stats').addEventListener('click', () => setMode('stats'));
 
 function setMode(m) {
   mode = m;
   document.getElementById('tab-broadcast').classList.toggle('active', m === 'broadcast');
   document.getElementById('tab-monkeys').classList.toggle('active', m === 'monkeys');
+  document.getElementById('tab-stats').classList.toggle('active', m === 'stats');
   document.getElementById('view-broadcast').classList.toggle('hidden', m !== 'broadcast');
   document.getElementById('view-monkeys').classList.toggle('hidden', m !== 'monkeys');
+  document.getElementById('view-stats').classList.toggle('hidden', m !== 'stats');
+  document.getElementById('new-chat-bar').classList.toggle('hidden', m === 'stats');
   browser.storage.local.set({ mode });
   renderLog();
+  if (m === 'stats') renderStats();
 }
 
 // ===== Broadcast target pills =====
@@ -72,14 +78,28 @@ ORDER.forEach(key => {
 });
 document.getElementById('btn-send-monkeys').addEventListener('click', sendMonkeys);
 
+// ===== Stats view wiring =====
+document.getElementById('stats-slider').addEventListener('input', e => {
+  statsWindow = { mode: 'count', n: Number(e.target.value) };
+  browser.storage.local.set({ statsWindow });
+  renderStats();
+});
+document.getElementById('stats-today-btn').addEventListener('click', () => {
+  statsWindow = { mode: statsWindow.mode === 'today' ? 'count' : 'today', n: statsWindow.n || 6 };
+  browser.storage.local.set({ statsWindow });
+  renderStats();
+});
+
 // ===== Restore state =====
 browser.storage.local.get([
   'logBroadcast', 'logMonkeys', 'targets', 'draftBroadcast',
-  'monkeyTexts', 'monkeyTargets', 'mode', 'monkeySendTimestamps'
+  'monkeyTexts', 'monkeyTargets', 'mode', 'monkeySendTimestamps', 'statsWindow'
 ]).then(r => {
   if (r.logBroadcast) logBroadcast = r.logBroadcast;
   if (r.logMonkeys) logMonkeys = r.logMonkeys;
   if (r.monkeySendTimestamps) monkeySendTimestamps = r.monkeySendTimestamps;
+  if (r.statsWindow) statsWindow = r.statsWindow;
+  renderAmbientHint();
 
   if (r.targets) {
     targets = r.targets;
@@ -278,7 +298,7 @@ function activeLog() {
 
 function addLog(scope, text, meta) {
   const now = new Date();
-  const ts = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const entry = { ts, tsFull: now.getTime(), role: 'user', text, meta };
   if (scope === 'monkeys') {
     logMonkeys.push(entry);
@@ -289,6 +309,8 @@ function addLog(scope, text, meta) {
     logBroadcast.push(entry);
     if (logBroadcast.length > 1000) logBroadcast = logBroadcast.slice(-1000);
     browser.storage.local.set({ logBroadcast });
+    renderAmbientHint();
+    if (mode === 'stats') renderStats();
   }
   renderLog();
 }
@@ -323,6 +345,8 @@ function clearLog() {
   } else {
     logBroadcast = [];
     browser.storage.local.set({ logBroadcast });
+    renderAmbientHint();
+    if (mode === 'stats') renderStats();
   }
   renderLog();
 }
@@ -347,12 +371,13 @@ async function downloadLog() {
     const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (dateKey !== lastDateKey) {
       if (lastDateKey !== null) content += '\n';
-      content += `${dateKey} ${DIVIDER}\n`;
+      const weekday = d.toLocaleDateString('ja-JP', { weekday: 'short' });
+      content += `${dateKey}(${weekday}) ${DIVIDER}\n`;
       lastDateKey = dateKey;
     }
     const hh = String(d.getHours()).padStart(2, '0');
     const mi = String(d.getMinutes()).padStart(2, '0');
-    content += `[${hh}:${mi}]${l.meta ? ' → ' + l.meta : ''}\n${l.text}\n\n`;
+    content += `${l.text}${l.meta ? ' → ' + l.meta : ''}\n[${hh}:${mi}]\n\n`;
   });
   if (!content) content = '(no messages)';
 
@@ -380,6 +405,8 @@ async function downloadLog() {
     } else {
       logBroadcast = [];
       browser.storage.local.set({ logBroadcast });
+      renderAmbientHint();
+      if (mode === 'stats') renderStats();
     }
     renderLog();
   } catch (e) {
@@ -387,4 +414,223 @@ async function downloadLog() {
     setStatus(statusId, `Export failed: ${e.message || e}`, 'err');
   }
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ===== Stats (ambient reflection, not a limiter — broadcast log only) =====
+function gapColor(gapMs) {
+  if (gapMs == null) return '#55555f';
+  const minutes = Math.max(0.5, Math.min(240, gapMs / 60000));
+  const t = 1 - (Math.log(minutes) - Math.log(0.5)) / (Math.log(240) - Math.log(0.5)); // 1 = rapid, 0 = calm
+  const hue = 220 - t * 200; // 220 blue (calm) → 20 warm (rapid)
+  return `hsl(${hue}, 55%, 58%)`;
+}
+
+function gapAgo(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 1) return 'moments apart';
+  if (min < 60) return `${min}分ぶり`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}時間ぶり`;
+  return `${Math.round(hr / 24)}日ぶり`;
+}
+
+function latestEntryInfo() {
+  if (logBroadcast.length === 0) return null;
+  const last = logBroadcast[logBroadcast.length - 1];
+  const prev = logBroadcast.length > 1 ? logBroadcast[logBroadcast.length - 2] : null;
+  const gapMs = prev ? last.tsFull - prev.tsFull : null;
+  return {
+    text: `${last.text.length} chars · ${gapMs == null ? 'first of the session' : gapAgo(gapMs)}`,
+    color: gapColor(gapMs)
+  };
+}
+
+function renderAmbientHint() {
+  const el = document.getElementById('ambient-hint');
+  if (!el) return;
+  const info = latestEntryInfo();
+  el.textContent = info ? info.text : '';
+  el.style.color = info ? info.color : '';
+}
+
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 !== 0 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function variance(arr, avg) { return mean(arr.map(v => (v - avg) ** 2)); }
+function stdDev(arr, avg) { return arr.length > 1 ? Math.sqrt(variance(arr, avg)) : NaN; }
+
+// A single neutral glyph for "is this higher/lower/about the same as usual" —
+// no red/green, no up-is-good framing. Within 25% of scale counts as "same".
+function trendSymbol(diff, scale) {
+  if (!isFinite(diff)) return '';
+  if (!isFinite(scale) || scale === 0) return Math.abs(diff) < 1e-9 ? '●' : (diff > 0 ? '▲' : '▽');
+  const ratio = diff / scale;
+  if (Math.abs(ratio) < 0.25) return '●';
+  return ratio > 0 ? '▲' : '▽';
+}
+
+function fmt(n, dec) { return isFinite(n) ? n.toFixed(dec) : '—'; }
+function fmtSigned(n, dec) { return isFinite(n) ? `${n >= 0 ? '+' : ''}${n.toFixed(dec)}` : '—'; }
+
+function hourKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`; }
+function dayKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+
+function bucketCounts(entries, keyFn) {
+  const counts = {};
+  entries.forEach(e => { const k = keyFn(e.tsFull); counts[k] = (counts[k] || 0) + 1; });
+  return Object.values(counts);
+}
+
+function gapsOf(entries) {
+  const gaps = [];
+  for (let i = 1; i < entries.length; i++) gaps.push((entries[i].tsFull - entries[i - 1].tsFull) / 60000);
+  return gaps;
+}
+
+// One row: baseline (avg/median/sd) from `baselineArr`, "now" compared against
+// the baseline average, and the sd itself compared against a shorter recent
+// slice (`recentArr`) to say whether things have gotten more or less scattered.
+function metricRow(baselineArr, nowValue, recentArr) {
+  if (baselineArr.length === 0) return null;
+  const avg = mean(baselineArr);
+  const med = median(baselineArr);
+  const sd = stdDev(baselineArr, avg);
+  const diffNow = isFinite(nowValue) ? nowValue - avg : NaN;
+  const diffSymbol = trendSymbol(diffNow, isFinite(sd) && sd > 0 ? sd : Math.abs(avg) * 0.2 || 1);
+  let sdSymbol = '';
+  if (recentArr && recentArr.length > 1 && isFinite(sd)) {
+    const recentSd = stdDev(recentArr, mean(recentArr));
+    sdSymbol = trendSymbol(recentSd - sd, sd || 1);
+  }
+  return { avg, med, sd, diffNow, diffSymbol, sdSymbol };
+}
+
+function statsWindowEntries() {
+  if (statsWindow.mode === 'today') {
+    const now = new Date();
+    return logBroadcast.filter(e => {
+      const t = new Date(e.tsFull || 0);
+      return t.getFullYear() === now.getFullYear() && t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
+    });
+  }
+  return logBroadcast.slice(-statsWindow.n);
+}
+
+function renderStats() {
+  const latestEl = document.getElementById('stats-latest');
+  const windowLabelEl = document.getElementById('stats-window-label');
+  const tableEl = document.getElementById('stats-table');
+  const svg = document.getElementById('stats-ambient');
+
+  const latest = latestEntryInfo();
+  latestEl.textContent = latest ? latest.text : 'No sends yet';
+  latestEl.style.color = latest ? latest.color : '';
+
+  document.getElementById('stats-slider').value = statsWindow.n || 6;
+  document.getElementById('stats-today-btn').classList.toggle('active', statsWindow.mode === 'today');
+
+  const entries = statsWindowEntries();
+
+  if (logBroadcast.length === 0) {
+    windowLabelEl.textContent = statsWindow.mode === 'today' ? 'Today · no sends yet' : `Last ${statsWindow.n} · no sends yet`;
+    tableEl.innerHTML = '';
+    svg.innerHTML = '';
+    return;
+  }
+
+  windowLabelEl.textContent = statsWindow.mode === 'today'
+    ? `Today · ${entries.length} sends`
+    : `Last ${entries.length} sends`;
+
+  renderStatsTable(tableEl, entries);
+  renderAmbientSvg(svg, entries.length ? entries : logBroadcast.slice(-12));
+}
+
+// Baseline (avg/median/sd) is always all-time — a stable self-reference.
+// "Now" and the recent-window slice (governed by the slider/Today toggle)
+// are what move around it.
+function renderStatsTable(tableEl, windowEntries) {
+  const now = Date.now();
+  const last = logBroadcast[logBroadcast.length - 1];
+
+  const allLens = logBroadcast.map(e => e.text.length);
+  const recentLens = windowEntries.map(e => e.text.length);
+  const charsRow = metricRow(allLens, last.text.length, recentLens);
+
+  const allGaps = gapsOf(logBroadcast);
+  const recentGaps = gapsOf(windowEntries);
+  const liveSilence = (now - last.tsFull) / 60000;
+  const silenceRow = metricRow(allGaps, liveSilence, recentGaps);
+
+  const hourCounts = bucketCounts(logBroadcast, hourKey);
+  const nowHourCount = logBroadcast.filter(e => hourKey(e.tsFull) === hourKey(now)).length;
+  const recentHourCounts = bucketCounts(windowEntries, hourKey);
+  const hourRow = metricRow(hourCounts, nowHourCount, recentHourCounts);
+
+  const dayCounts = bucketCounts(logBroadcast, dayKey);
+  const nowDayCount = logBroadcast.filter(e => dayKey(e.tsFull) === dayKey(now)).length;
+  const recentDayCounts = bucketCounts(windowEntries, dayKey);
+  const dayRow = metricRow(dayCounts, nowDayCount, recentDayCounts);
+
+  const rows = [
+    { label: 'Chars / send', row: charsRow, dec: 0 },
+    { label: 'Sends / hour', row: hourRow, dec: 1 },
+    { label: 'Sends / day', row: dayRow, dec: 1 },
+    { label: 'Silence (min)', row: silenceRow, dec: 0 }
+  ];
+
+  tableEl.innerHTML = `
+    <table class="stats-table">
+      <thead><tr><th></th><th>Avg</th><th>Now Δ</th><th>Median</th><th>SD</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td class="stats-row-label">${r.label}</td>
+            ${r.row ? `
+              <td>${fmt(r.row.avg, r.dec)}</td>
+              <td>${fmtSigned(r.row.diffNow, r.dec)} <span class="trend">${r.row.diffSymbol}</span></td>
+              <td>${fmt(r.row.med, r.dec)}</td>
+              <td>${fmt(r.row.sd, r.dec)} <span class="trend">${r.row.sdSymbol}</span></td>
+            ` : `<td colspan="4">—</td>`}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderAmbientSvg(svg, entries) {
+  const shown = entries.slice(-12);
+  const offset = entries.length - shown.length; // entries before `shown` start, for gap-to-previous on the first dot
+  const w = 440, hFull = 72, padY = 12;
+  const h = hFull - padY * 2;
+  const stepX = w / (shown.length + 1);
+  const lens = shown.map(e => e.text.length);
+  const maxLen = Math.max(...lens, 1);
+  const minLen = Math.min(...lens, 0);
+  const range = Math.max(maxLen - minLen, 1);
+
+  const points = shown.map((e, i) => {
+    const cx = stepX * (i + 1);
+    const norm = (e.text.length - minLen) / range;
+    const cy = padY + h * (1 - norm);
+    const r = 4 + Math.sqrt(e.text.length / maxLen) * 12;
+    const prev = i > 0 ? shown[i - 1] : (offset > 0 ? entries[offset - 1] : null);
+    const gapMs = prev ? e.tsFull - prev.tsFull : null;
+    return { cx, cy, r, color: gapColor(gapMs) };
+  });
+
+  const polyline = points.map(p => `${p.cx.toFixed(1)},${p.cy.toFixed(1)}`).join(' ');
+  const circles = points.map(p =>
+    `<circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${p.color}" fill-opacity="0.55" stroke="${p.color}" stroke-opacity="0.85" />`
+  ).join('');
+
+  svg.innerHTML = points.length > 1
+    ? `<polyline points="${polyline}" fill="none" stroke="#3a3a45" stroke-width="1.5" />${circles}`
+    : circles;
 }
