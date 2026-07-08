@@ -5,6 +5,11 @@ let mode = 'broadcast';
 let logBroadcast = [];
 let logMonkeys = [];
 let statsWindow = { mode: 'count', n: 6 }; // ambient reflection window for the Stats tab (broadcast log only)
+let sessionStart = null;   // ms — when the current unbroken session began
+let lastActivityAt = null; // ms — last broadcast send, used to detect downtime
+const SESSION_GAP_MS = 60 * 60 * 1000; // >1hr since the last send starts a new session
+let chartMetric = 'avg'; // 'avg' | 'median' | 'ema' — which trend line the ambient chart draws
+const CHART_PERIOD = 6;  // rolling window / EMA period, in sends
 
 const URLS = {
   gpt:    'https://chatgpt.com/',
@@ -13,7 +18,7 @@ const URLS = {
 };
 
 const NEW_CHAT_URLS = {
-  gpt:    'https://chatgpt.com/',
+  gpt:    'https://chatgpt.com/g/g-67edab4a24fc8191b975acaa8da2dcef-monday',
   claude: 'https://claude.ai/new',
   gemini: 'https://gemini.google.com/app'
 };
@@ -90,15 +95,31 @@ document.getElementById('stats-today-btn').addEventListener('click', () => {
   renderStats();
 });
 
+document.querySelectorAll('.chart-metric-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    chartMetric = btn.dataset.metric;
+    document.querySelectorAll('.chart-metric-btn').forEach(b => b.classList.toggle('active', b === btn));
+    browser.storage.local.set({ chartMetric });
+    renderStats();
+  });
+});
+
 // ===== Restore state =====
 browser.storage.local.get([
   'logBroadcast', 'logMonkeys', 'targets', 'draftBroadcast',
-  'monkeyTexts', 'monkeyTargets', 'mode', 'monkeySendTimestamps', 'statsWindow'
+  'monkeyTexts', 'monkeyTargets', 'mode', 'monkeySendTimestamps', 'statsWindow',
+  'sessionStart', 'lastActivityAt', 'chartMetric'
 ]).then(r => {
   if (r.logBroadcast) logBroadcast = r.logBroadcast;
   if (r.logMonkeys) logMonkeys = r.logMonkeys;
+  if (r.chartMetric) {
+    chartMetric = r.chartMetric;
+    document.querySelectorAll('.chart-metric-btn').forEach(b => b.classList.toggle('active', b.dataset.metric === chartMetric));
+  }
   if (r.monkeySendTimestamps) monkeySendTimestamps = r.monkeySendTimestamps;
   if (r.statsWindow) statsWindow = r.statsWindow;
+  if (r.sessionStart) sessionStart = r.sessionStart;
+  if (r.lastActivityAt) lastActivityAt = r.lastActivityAt;
   renderAmbientHint();
 
   if (r.targets) {
@@ -309,8 +330,8 @@ function addLog(scope, text, meta) {
     logBroadcast.push(entry);
     if (logBroadcast.length > 1000) logBroadcast = logBroadcast.slice(-1000);
     browser.storage.local.set({ logBroadcast });
+    touchSession(now.getTime());
     renderAmbientHint();
-    if (mode === 'stats') renderStats();
   }
   renderLog();
 }
@@ -346,7 +367,6 @@ function clearLog() {
     logBroadcast = [];
     browser.storage.local.set({ logBroadcast });
     renderAmbientHint();
-    if (mode === 'stats') renderStats();
   }
   renderLog();
 }
@@ -406,7 +426,6 @@ async function downloadLog() {
       logBroadcast = [];
       browser.storage.local.set({ logBroadcast });
       renderAmbientHint();
-      if (mode === 'stats') renderStats();
     }
     renderLog();
   } catch (e) {
@@ -423,6 +442,21 @@ function gapColor(gapMs) {
   const t = 1 - (Math.log(minutes) - Math.log(0.5)) / (Math.log(240) - Math.log(0.5)); // 1 = rapid, 0 = calm
   const hue = 220 - t * 200; // 220 blue (calm) → 20 warm (rapid)
   return `hsl(${hue}, 55%, 58%)`;
+}
+
+function fmtHHMM(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Downtime since the last send decides whether this is a continuing session
+// (sessionStart stays put) or a fresh one (sessionStart resets to now).
+function touchSession(ts) {
+  if (lastActivityAt == null || (ts - lastActivityAt) > SESSION_GAP_MS) {
+    sessionStart = ts;
+  }
+  lastActivityAt = ts;
+  browser.storage.local.set({ sessionStart, lastActivityAt });
 }
 
 function gapAgo(ms) {
@@ -449,7 +483,8 @@ function renderAmbientHint() {
   const el = document.getElementById('ambient-hint');
   if (!el) return;
   const info = latestEntryInfo();
-  el.textContent = info ? info.text : '';
+  const sessionPrefix = (info && sessionStart != null) ? `Session since ${fmtHHMM(sessionStart)} · ` : '';
+  el.textContent = info ? sessionPrefix + info.text : '';
   el.style.color = info ? info.color : '';
 }
 
@@ -463,6 +498,20 @@ function median(arr) {
 
 function variance(arr, avg) { return mean(arr.map(v => (v - avg) ** 2)); }
 function stdDev(arr, avg) { return arr.length > 1 ? Math.sqrt(variance(arr, avg)) : NaN; }
+
+// Rolling avg/median over a trailing window, one output value per input point.
+function rollingSeries(arr, period, kind) {
+  return arr.map((_, i) => {
+    const slice = arr.slice(Math.max(0, i - period + 1), i + 1);
+    return kind === 'median' ? median(slice) : mean(slice);
+  });
+}
+
+function emaSeries(arr, period) {
+  const alpha = 2 / (period + 1);
+  let prev = null;
+  return arr.map(v => { prev = prev == null ? v : v * alpha + prev * (1 - alpha); return prev; });
+}
 
 // A single neutral glyph for "is this higher/lower/about the same as usual" —
 // no red/green, no up-is-good framing. Within 25% of scale counts as "same".
@@ -606,31 +655,63 @@ function renderStatsTable(tableEl, windowEntries) {
 
 function renderAmbientSvg(svg, entries) {
   const shown = entries.slice(-12);
+  if (shown.length === 0) { svg.innerHTML = ''; return; }
   const offset = entries.length - shown.length; // entries before `shown` start, for gap-to-previous on the first dot
-  const w = 440, hFull = 72, padY = 12;
-  const h = hFull - padY * 2;
-  const stepX = w / (shown.length + 1);
-  const lens = shown.map(e => e.text.length);
-  const maxLen = Math.max(...lens, 1);
-  const minLen = Math.min(...lens, 0);
+
+  // The smoothed line is computed over the *full* history so it has real
+  // trailing context, then we read off just the values lined up with `shown`.
+  const allLens = logBroadcast.map(e => e.text.length);
+  const smoothAll = chartMetric === 'median' ? rollingSeries(allLens, CHART_PERIOD, 'median')
+    : chartMetric === 'ema' ? emaSeries(allLens, CHART_PERIOD)
+    : rollingSeries(allLens, CHART_PERIOD, 'avg');
+  const sd = stdDev(allLens, mean(allLens));
+  const band = isFinite(sd) ? sd : 0;
+
+  const shownIdx = shown.map(e => logBroadcast.indexOf(e));
+  const smoothVals = shownIdx.map(i => smoothAll[i]);
+
+  // x maps to real elapsed time (not index), so bursts cluster and quiet
+  // stretches leave visible empty space — frequency/timing at a glance.
+  const w = 440, hFull = 72, padX = 16, padTop = 10, padBottom = 20;
+  const h = hFull - padTop - padBottom;
+  const minTs = shown[0].tsFull;
+  const maxTs = shown[shown.length - 1].tsFull;
+  const tsSpan = Math.max(maxTs - minTs, 1);
+  const xOf = ts => shown.length > 1 ? padX + (w - padX * 2) * (ts - minTs) / tsSpan : w / 2;
+
+  const rawLens = shown.map(e => e.text.length);
+  const maxLen = Math.max(...rawLens, ...smoothVals.map(v => v + band), 1);
+  const minLen = Math.min(...rawLens, ...smoothVals.map(v => v - band), 0);
   const range = Math.max(maxLen - minLen, 1);
+  const yOf = v => padTop + h * (1 - (v - minLen) / range);
 
   const points = shown.map((e, i) => {
-    const cx = stepX * (i + 1);
-    const norm = (e.text.length - minLen) / range;
-    const cy = padY + h * (1 - norm);
-    const r = 4 + Math.sqrt(e.text.length / maxLen) * 12;
+    const cx = xOf(e.tsFull);
+    const cy = yOf(e.text.length);
+    const r = 3 + Math.sqrt(e.text.length / Math.max(...rawLens, 1)) * 8;
     const prev = i > 0 ? shown[i - 1] : (offset > 0 ? entries[offset - 1] : null);
     const gapMs = prev ? e.tsFull - prev.tsFull : null;
     return { cx, cy, r, color: gapColor(gapMs) };
   });
 
-  const polyline = points.map(p => `${p.cx.toFixed(1)},${p.cy.toFixed(1)}`).join(' ');
+  const smoothPoints = shown.map((e, i) => ({ cx: xOf(e.tsFull), cy: yOf(smoothVals[i]) }));
+  const smoothLine = smoothPoints.map(p => `${p.cx.toFixed(1)},${p.cy.toFixed(1)}`).join(' ');
+  const bandTop = shown.map((e, i) => `${xOf(e.tsFull).toFixed(1)},${yOf(smoothVals[i] + band).toFixed(1)}`);
+  const bandBottom = shown.map((e, i) => `${xOf(e.tsFull).toFixed(1)},${yOf(smoothVals[i] - band).toFixed(1)}`).reverse();
+  const bandPath = `${bandTop.join(' ')} ${bandBottom.join(' ')}`;
+
   const circles = points.map(p =>
-    `<circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${p.color}" fill-opacity="0.55" stroke="${p.color}" stroke-opacity="0.85" />`
+    `<circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${p.color}" fill-opacity="0.5" stroke="${p.color}" stroke-opacity="0.8" />`
   ).join('');
 
-  svg.innerHTML = points.length > 1
-    ? `<polyline points="${polyline}" fill="none" stroke="#3a3a45" stroke-width="1.5" />${circles}`
-    : circles;
+  const bandSvg = smoothPoints.length > 1 && band > 0
+    ? `<polygon points="${bandPath}" fill="#4a9eff" fill-opacity="0.08" />` : '';
+  const lineSvg = smoothPoints.length > 1
+    ? `<polyline points="${smoothLine}" fill="none" stroke="#8a8a95" stroke-width="1.5" />` : '';
+  const timeLabels = shown.length > 1
+    ? `<text x="${padX}" y="${hFull - 4}" font-size="8" fill="#55555f" font-family="monospace">${fmtHHMM(minTs)}</text>
+       <text x="${w - padX}" y="${hFull - 4}" font-size="8" fill="#55555f" font-family="monospace" text-anchor="end">${fmtHHMM(maxTs)}</text>`
+    : '';
+
+  svg.innerHTML = `${bandSvg}${lineSvg}${circles}${timeLabels}`;
 }
