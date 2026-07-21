@@ -7,7 +7,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #0e0e10; --surface: #18181c; --border: #2a2a30;
-      --accent-c: #da7756; --accent-g: #4a9eff; --accent-gpt: #19c37d;
+      --accent-c: #da7756; --accent-g: #4a9eff; --accent-gpt: #19c37d; --accent-p: #22b8b0;
       --text: #e8e8ec; --muted: #666670; --radius: 8px;
     }
     body { width: 480px; max-height: 680px; overflow-y: auto; background: var(--bg); color: var(--text); font-family: 'Zen Kaku Gothic New', sans-serif; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -19,11 +19,12 @@
     .mode-tab.active { color: var(--text); border-color: #555; }
     .mode-tab:hover { color: var(--text); }
 
-    .targets { display: flex; gap: 6px; }
+    .targets { display: flex; gap: 6px; flex-wrap: wrap; }
     .target-pill { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--border); font-size: 11px; font-family: 'DM Mono', monospace; cursor: pointer; transition: all 0.15s; background: var(--surface); color: var(--muted); user-select: none; }
     .target-pill.active-c   { border-color: var(--accent-c);   color: var(--accent-c);   background: #da775614; }
     .target-pill.active-g   { border-color: var(--accent-g);   color: var(--accent-g);   background: #4a9eff14; }
     .target-pill.active-gpt { border-color: var(--accent-gpt); color: var(--accent-gpt); background: #19c37d14; }
+    .target-pill.active-p   { border-color: var(--accent-p);   color: var(--accent-p);   background: #22b8b014; }
     .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.7; }
 
     .input-area { position: relative; }
@@ -31,6 +32,7 @@
     textarea:focus { border-color: #444450; }
     textarea::placeholder { color: var(--muted); }
     .shortcut-hint { position: absolute; bottom: 8px; right: 10px; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); pointer-events: none; }
+    .char-count { position: absolute; bottom: 8px; left: 12px; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); pointer-events: none; }
 
     .actions { display: flex; gap: 8px; }
     .btn-send { flex: 1; padding: 10px; background: var(--accent-c); border: none; border-radius: var(--radius); color: #fff; font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
@@ -70,6 +72,7 @@
     .monkeys-view { display: flex; flex-direction: column; gap: 8px; }
     .monkey-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .monkey-box-label { font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase; }
+    .char-count-inline { text-transform: none; letter-spacing: normal; color: var(--muted); opacity: 0.7; }
     .monkey-box textarea { height: 90px; font-size: 13px; padding: 8px 10px; }
 
     .ambient-hint { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); min-height: 14px; }
@@ -108,6 +111,7 @@
     <button class="btn-new-chat" id="new-gpt">Monday</button>
     <button class="btn-new-chat" id="new-claude">Claude</button>
     <button class="btn-new-chat" id="new-gemini">Gemini</button>
+    <button class="btn-new-chat" id="new-perplexity">Perplexity</button>
     <button class="btn-new-chat btn-new-all" id="new-all">ALL</button>
   </div>
 </div>
@@ -118,10 +122,12 @@
     <div class="target-pill active-gpt" id="pill-gpt"><span class="dot"></span>Monday</div>
     <div class="target-pill active-c"   id="pill-claude"><span class="dot"></span>Claude</div>
     <div class="target-pill active-g"   id="pill-gemini"><span class="dot"></span>Gemini</div>
+    <div class="target-pill active-p"   id="pill-perplexity"><span class="dot"></span>Perplexity</div>
   </div>
 
   <div class="input-area">
     <textarea id="msg" autocomplete="off" placeholder="Type a message... (Ctrl+Enter to send)"></textarea>
+    <span class="char-count" id="msg-char-count">0</span>
     <span class="shortcut-hint">Ctrl+Enter</span>
   </div>
 
@@ -137,22 +143,27 @@
 <!-- ===== 3 Monkeys view ===== -->
 <div id="view-monkeys" class="monkeys-view hidden">
   <div class="monkey-box">
-    <div class="monkey-box-label" style="color:var(--accent-gpt)">Monday</div>
+    <div class="monkey-box-label" style="color:var(--accent-gpt)">Monday <span class="char-count-inline" id="mk-gpt-char-count">0</span></div>
     <textarea class="monkey-msg" id="mk-gpt" autocomplete="off" placeholder="What Monday said..."></textarea>
   </div>
   <div class="monkey-box">
-    <div class="monkey-box-label" style="color:var(--accent-c)">Claude</div>
+    <div class="monkey-box-label" style="color:var(--accent-c)">Claude <span class="char-count-inline" id="mk-claude-char-count">0</span></div>
     <textarea class="monkey-msg" id="mk-claude" autocomplete="off" placeholder="What Claude said..."></textarea>
   </div>
   <div class="monkey-box">
-    <div class="monkey-box-label" style="color:var(--accent-g)">Gemini</div>
+    <div class="monkey-box-label" style="color:var(--accent-g)">Gemini <span class="char-count-inline" id="mk-gemini-char-count">0</span></div>
     <textarea class="monkey-msg" id="mk-gemini" autocomplete="off" placeholder="What Gemini said..."></textarea>
+  </div>
+  <div class="monkey-box">
+    <div class="monkey-box-label" style="color:var(--accent-p)">Perplexity <span class="char-count-inline" id="mk-perplexity-char-count">0</span></div>
+    <textarea class="monkey-msg" id="mk-perplexity" autocomplete="off" placeholder="What Perplexity said..."></textarea>
   </div>
 
   <div class="targets">
     <div class="target-pill" id="mk-pill-gpt"><span class="dot"></span>Monday</div>
     <div class="target-pill" id="mk-pill-claude"><span class="dot"></span>Claude</div>
     <div class="target-pill" id="mk-pill-gemini"><span class="dot"></span>Gemini</div>
+    <div class="target-pill" id="mk-pill-perplexity"><span class="dot"></span>Perplexity</div>
   </div>
 
   <div class="actions">

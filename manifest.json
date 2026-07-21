@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "AI Broadcaster",
   "version": "1.0.0",
-  "description": "ChatGPT・Claude・Geminiに同時送信＆会話ログ保存",
+  "description": "ChatGPT・Claude・Gemini・Perplexityに同時送信＆会話ログ保存",
   "browser_specific_settings": {
     "gecko": {
       "id": "three-monkeys@otaotaotao"
@@ -17,7 +17,8 @@
     "clipboardRead",
     "https://claude.ai/*",
     "https://chatgpt.com/*",
-    "https://gemini.google.com/*"
+    "https://gemini.google.com/*",
+    "https://www.perplexity.ai/*"
   ],
   "browser_action": {
     "default_popup": "popup.html",
@@ -43,6 +44,11 @@
     {
       "matches": ["https://gemini.google.com/*"],
       "js": ["content-gemini.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.perplexity.ai/*"],
+      "js": ["content-perplexity.js"],
       "run_at": "document_idle"
     }
   ]

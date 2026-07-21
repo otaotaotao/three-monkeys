@@ -1,6 +1,6 @@
-let targets = { gpt: true, claude: true, gemini: true };
-let monkeyTargets = { gpt: false, claude: false, gemini: false };
-let monkeyTexts = { gpt: '', claude: '', gemini: '' };
+let targets = { gpt: true, claude: true, gemini: true, perplexity: true };
+let monkeyTargets = { gpt: false, claude: false, gemini: false, perplexity: false };
+let monkeyTexts = { gpt: '', claude: '', gemini: '', perplexity: '' };
 let mode = 'broadcast';
 let logBroadcast = [];
 let logMonkeys = [];
@@ -12,19 +12,22 @@ let chartMetric = 'avg'; // 'avg' | 'median' | 'ema' — which trend line the am
 const CHART_PERIOD = 6;  // rolling window / EMA period, in sends
 
 const URLS = {
-  gpt:    'https://chatgpt.com/',
-  claude: 'https://claude.ai/',
-  gemini: 'https://gemini.google.com/'
+  gpt:        'https://chatgpt.com/',
+  claude:     'https://claude.ai/',
+  gemini:     'https://gemini.google.com/',
+  perplexity: 'https://www.perplexity.ai/'
 };
 
 const NEW_CHAT_URLS = {
-  gpt:    'https://chatgpt.com/g/g-67edab4a24fc8191b975acaa8da2dcef-monday',
-  claude: 'https://claude.ai/new',
-  gemini: 'https://gemini.google.com/app'
+  gpt:        'https://chatgpt.com/g/g-67edab4a24fc8191b975acaa8da2dcef-monday',
+  claude:     'https://claude.ai/new',
+  gemini:     'https://gemini.google.com/app',
+  perplexity: 'https://www.perplexity.ai/'
 };
 
-const LABELS = { gpt: 'Monday', claude: 'Claude', gemini: 'Gemini' };
-const ORDER = ['gpt', 'claude', 'gemini'];
+const LABELS = { gpt: 'Monday', claude: 'Claude', gemini: 'Gemini', perplexity: 'Perplexity' };
+const ORDER = ['gpt', 'claude', 'gemini', 'perplexity'];
+const TARGET_CLASS = { gpt: 'active-gpt', claude: 'active-c', gemini: 'active-g', perplexity: 'active-p' };
 
 // Rate limit for the 3 Monkeys "Send Combined" action only —
 // this loop is the one that can spiral into an endless AI-vs-AI-vs-AI cycle.
@@ -52,9 +55,9 @@ function setMode(m) {
 }
 
 // ===== Broadcast target pills =====
-document.getElementById('pill-gpt').addEventListener('click', () => toggleTarget('gpt'));
-document.getElementById('pill-claude').addEventListener('click', () => toggleTarget('claude'));
-document.getElementById('pill-gemini').addEventListener('click', () => toggleTarget('gemini'));
+ORDER.forEach(name => {
+  document.getElementById('pill-' + name).addEventListener('click', () => toggleTarget(name));
+});
 document.getElementById('btn-send').addEventListener('click', sendAll);
 document.getElementById('btn-clear').addEventListener('click', clearLog);
 document.getElementById('btn-dl-user').addEventListener('click', downloadLog);
@@ -64,11 +67,14 @@ document.getElementById('msg').addEventListener('keydown', e => {
 document.getElementById('msg').addEventListener('input', debounce(e => {
   browser.storage.local.set({ draftBroadcast: e.target.value });
 }, 300));
+document.getElementById('msg').addEventListener('input', e => {
+  document.getElementById('msg-char-count').textContent = e.target.value.length;
+});
 
 // ===== New chat buttons =====
-document.getElementById('new-gpt').addEventListener('click', () => newChat('gpt'));
-document.getElementById('new-claude').addEventListener('click', () => newChat('claude'));
-document.getElementById('new-gemini').addEventListener('click', () => newChat('gemini'));
+ORDER.forEach(name => {
+  document.getElementById('new-' + name).addEventListener('click', () => newChat(name));
+});
 document.getElementById('new-all').addEventListener('click', () => {
   ORDER.forEach(t => newChat(t));
 });
@@ -79,6 +85,9 @@ ORDER.forEach(key => {
     monkeyTexts[key] = e.target.value;
     browser.storage.local.set({ monkeyTexts });
   }, 300));
+  document.getElementById('mk-' + key).addEventListener('input', e => {
+    document.getElementById('mk-' + key + '-char-count').textContent = e.target.value.length;
+  });
   document.getElementById('mk-pill-' + key).addEventListener('click', () => toggleMonkeyTarget(key));
 });
 document.getElementById('btn-send-monkeys').addEventListener('click', sendMonkeys);
@@ -126,7 +135,7 @@ browser.storage.local.get([
     targets = r.targets;
     ORDER.forEach(name => {
       const pill = document.getElementById('pill-' + name);
-      const cls = { gpt: 'active-gpt', claude: 'active-c', gemini: 'active-g' }[name];
+      const cls = TARGET_CLASS[name];
       pill.classList.toggle(cls, !!targets[name]);
     });
   }
@@ -136,12 +145,15 @@ browser.storage.local.get([
   } else {
     document.getElementById('msg').value = '';
   }
+  document.getElementById('msg-char-count').textContent = document.getElementById('msg').value.length;
 
   if (r.monkeyTexts) {
     monkeyTexts = r.monkeyTexts;
   }
   ORDER.forEach(key => {
-    document.getElementById('mk-' + key).value = monkeyTexts[key] || '';
+    const val = monkeyTexts[key] || '';
+    document.getElementById('mk-' + key).value = val;
+    document.getElementById('mk-' + key + '-char-count').textContent = val.length;
   });
 
   if (r.monkeyTargets) {
@@ -157,7 +169,7 @@ browser.storage.local.get([
 function toggleTarget(name) {
   targets[name] = !targets[name];
   const pill = document.getElementById('pill-' + name);
-  const cls = { gpt: 'active-gpt', claude: 'active-c', gemini: 'active-g' }[name];
+  const cls = TARGET_CLASS[name];
   pill.classList.toggle(cls, targets[name]);
   browser.storage.local.set({ targets });
 }
@@ -173,6 +185,7 @@ async function sendAll() {
   // Clear immediately — if opening a missing tab steals focus and the
   // popup closes mid-send, we don't want the old text to survive.
   document.getElementById('msg').value = '';
+  document.getElementById('msg-char-count').textContent = '0';
   browser.storage.local.set({ draftBroadcast: '' });
 
   const selected = ORDER.filter(k => targets[k]);
@@ -202,7 +215,7 @@ function toggleMonkeyTarget(name) {
 
 function renderMonkeyPill(name) {
   const pill = document.getElementById('mk-pill-' + name);
-  const cls = { gpt: 'active-gpt', claude: 'active-c', gemini: 'active-g' }[name];
+  const cls = TARGET_CLASS[name];
   pill.classList.toggle(cls, !!monkeyTargets[name]);
 }
 
@@ -240,6 +253,7 @@ async function sendMonkeys() {
   // Clear immediately, before awaiting the sends (see sendAll for why).
   ORDER.forEach(key => {
     document.getElementById('mk-' + key).value = '';
+    document.getElementById('mk-' + key + '-char-count').textContent = '0';
     monkeyTexts[key] = '';
   });
   browser.storage.local.set({ monkeyTexts });
